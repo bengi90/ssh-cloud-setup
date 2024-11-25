@@ -1,0 +1,14 @@
+services:
+  bastion:
+    hostname: bastion
+    image: debian:bookworm
+    command: tail -f
+    volumes:
+      - ./script:/root/script
+    ports:
+      - 2222:22
+
+  target:
+    hostname: target
+    image: debian:bookworm
+    command: tail -f
