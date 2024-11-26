@@ -29,6 +29,6 @@ log "Installing setup script on the target..."
 scp setup-target.sh .env "root@$1:/root/"
 
 log "Running setup script on the target..."
-ssh "root@$1" "bash /root/setup-target.sh"
+ssh -t "root@$1" "bash /root/setup-target.sh"
 
 log "Target configured!"
