@@ -27,16 +27,14 @@ apt install -y \
     libnss-ldap \
     ldap-utils \
     openssh-server \
-    libpam-google-authenticator \
     nscd \
     nslcd \
-    qrencode \
     ansible
 
 log "Configuring LDAP..."
 cat > /etc/ldap.conf << EOF
 base ${LDAP_BASE_DN}
-uri ldap://${LDAP_HOST}
+uri ${LDAP_HOST}
 binddn ${LDAP_BIND_DN}
 bindpw ${LDAP_BIND_PW}
 pam_password md5
@@ -49,51 +47,46 @@ log "Configuring NSLCD..."
 cat > /etc/nslcd.conf << EOF
 uid nslcd
 gid nslcd
-uri ldap://${LDAP_HOST}
+uri ${LDAP_HOST}
 base ${LDAP_BASE_DN}
 binddn ${LDAP_BIND_DN}
 bindpw ${LDAP_BIND_PW}
+map     passwd          uid             sAMAccountName
+map     passwd          gecos           displayName
+map     passwd          loginShell      "/bin/bash"
 ssl start_tls
 tls_reqcert never
 EOF
 
 log "Configuring NSS..."
-cat > /etc/nsswitch.conf << EOF
-passwd:         files ldap
-group:          files ldap
-shadow:         files ldap
-gshadow:        files
-hosts:          files dns
-networks:       files
-protocols:      files
-services:       files
-ethers:         files
-rpc:            files
-netgroup:       files ldap
-sudoers:	      files ldap
-EOF
+sed -i 's/passwd:.*$/passwd: compat ldap/' /etc/nsswitch.conf
+sed -i 's/group:.*$/group: compat ldap/' /etc/nsswitch.conf
+sed -i 's/shadow:.*$/shadow: compat ldap/' /etc/nsswitch.conf
 
 log "Configuring PAM..."
-cat > /etc/pam.d/sshd << 'EOF'
-# Standard Un*x authentication
+# Configura il file /etc/pam.d/common-auth
+cat << EOF > /etc/pam.d/common-auth
 auth       required     pam_env.so
-# LDAP authentication
 auth       requisite    pam_ldap.so try_first_pass minimum_uid=1000
-# Google Authenticator
-auth       required     pam_google_authenticator.so nullok echo_verification_code debug
+EOF
 
-# Account management
+# Configura il file /etc/pam.d/common-account
+cat << EOF > /etc/pam.d/common-account
 account    required     pam_unix.so
 account    sufficient   pam_ldap.so
 account    required     pam_permit.so
+EOF
 
-# Session management
+# Configura il file /etc/pam.d/common-session
+cat << EOF > /etc/pam.d/common-session
 session    required     pam_unix.so
 session    optional     pam_ldap.so
 session    required     pam_limits.so
 session    required     pam_mkhomedir.so skel=/etc/skel/ umask=0022
+EOF
 
-# Password management
+# Configura il file /etc/pam.d/common-password
+cat << EOF > /etc/pam.d/common-password
 password   required     pam_unix.so nullok obscure sha512
 password   sufficient   pam_ldap.so
 EOF
@@ -130,24 +123,12 @@ EOF
 log "Generating bastion CA"
 ssh-keygen -t rsa -b 4096 -f /etc/ssh/ca_key
 
-log "Setting up google-authenticator"
-cat << 'EOF' > /etc/profile.d/google-authenticator-setup.sh
-#!/bin/bash
-# config authenticator
-if [ ! -f "$HOME/.google_authenticator" ]; then
-    google-authenticator -t -d -f -w 3 -l "SSH access to $(hostname)" -r 3 -R 30 -q
-
-	CODE="$(head -1 $HOME/.google_authenticator)"
-
-	qrencode -t UTF8 "otpauth://totp/$(hostname):$USER?secret=$CODE&issuer=$(hostname)"
-
-	logout
-fi
-EOF
-
 log "Restarting services..."
 systemctl restart nslcd
 systemctl restart nscd
 systemctl restart ssh
+
+log "Configuring password-less sudo for sudo group"
+sed -i 's/%sudo.*$/%sudo	ALL=(ALL) NOPASSWD: ALL/' /etc/sudoers
 
 log "Install completed!"
